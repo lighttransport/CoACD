@@ -23,6 +23,10 @@
 #include "config.h"
 #include "logger.h"
 
+#ifndef COACD_ENABLE_IO
+#define COACD_ENABLE_IO 1
+#endif
+
 using std::map;
 
 namespace coacd
@@ -69,9 +73,13 @@ namespace coacd
 
         Model();
         bool CheckThin();
+#if COACD_ENABLE_IO
         bool LoadOBJ(const string &fileName);
+#endif
         bool Load(vector<vec3d> vertices, vector<vec3i> face_indices);
+#if COACD_ENABLE_IO
         void SaveOBJ(const string &fileName);
+#endif
         array<array<double, 3>, 3> PCA();
         vector<double> Normalize();
         void Recover(vector<double> _bbox);

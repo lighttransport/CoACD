@@ -5,17 +5,19 @@
 #include <random>
 #include <fstream>
 #include <vector>
+#include <cstdint>
 #include <math.h>
 #include <limits>
 #include <typeinfo>
 #include <algorithm>
 #include <assert.h>
+#include <map>
 #include <regex>
+#include <utility>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-#include "./io.h"
 #include "clip.h"
 #include "config.h"
 #include "model_obj.h"

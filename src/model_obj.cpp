@@ -459,6 +459,7 @@ namespace coacd
 
     /////////// IO /////////////
 
+#if COACD_ENABLE_IO
     bool Model::LoadOBJ(const string &fileName)
     {
         const unsigned int BufferSize = 1024;
@@ -552,6 +553,7 @@ namespace coacd
         }
         return true;
     }
+#endif
 
     bool Model::Load(vector<vec3d> vertices, vector<vec3i> face_indices)
     {
@@ -681,6 +683,7 @@ namespace coacd
         triangles.clear();
     }
 
+#if COACD_ENABLE_IO
     void Model::SaveOBJ(const string &filename)
     {
         std::ofstream os(filename);
@@ -694,6 +697,7 @@ namespace coacd
         }
         os.close();
     }
+#endif
 
     double MeshArea(Model &mesh)
     {

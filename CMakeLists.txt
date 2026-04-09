@@ -13,6 +13,24 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(WITH_3RD_PARTY_LIBS "Include 3rd party libraries" ON)
+option(COACD_BUILD_CLI "Build the command-line executable" ON)
+option(COACD_BUILD_SHARED_WRAPPER
+       "Build the shared wrapper used by the Python package" ON)
+option(COACD_ENABLE_IO "Enable CLI/file IO code paths" ON)
+option(COACD_USE_CDT_TRIANGULATION
+       "Use bundled CDT for clipping triangulation instead of the built-in ear clipping path"
+       OFF)
+option(COACD_LIBRARY_ONLY
+       "Configure a minimal library-only build with no 3rd party libs or IO"
+       OFF)
+
+if(COACD_LIBRARY_ONLY)
+    set(WITH_3RD_PARTY_LIBS OFF CACHE BOOL "Include 3rd party libraries" FORCE)
+    set(COACD_ENABLE_IO OFF CACHE BOOL "Enable CLI/file IO code paths" FORCE)
+    set(COACD_BUILD_CLI OFF CACHE BOOL "Build the command-line executable" FORCE)
+    set(COACD_BUILD_SHARED_WRAPPER OFF CACHE BOOL
+        "Build the shared wrapper used by the Python package" FORCE)
+endif()
 
 # --- Compiler-specific flags
 if(MSVC)
@@ -59,61 +77,127 @@ else()
     set(CMAKE_INSTALL_BINDIR bin)
 endif()
 
+include(CTest)
+
 # ##############################################################################
 # BUILD Program
 # ##############################################################################
 
-file(GLOB_RECURSE COACD_SRC "src/*.cc" "src/*.cpp" "public/coacd.cpp")
+file(GLOB_RECURSE COACD_SRC "src/*.cc" "src/*.cpp")
+list(FILTER COACD_SRC EXCLUDE REGEX ".*/io\\.cpp$")
 if(NOT WITH_3RD_PARTY_LIBS)
     # Exclude files that match the pattern "preprocess*"
     list(FILTER COACD_SRC EXCLUDE REGEX ".*preprocess.*")
 endif()
 
-add_library(coacd STATIC ${COACD_SRC})
-target_include_directories(
-  coacd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/public>
-               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_include_directories(coacd PRIVATE 3rd/cdt/CDT/include)
-set_target_properties(coacd PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
-
-if(WITH_3RD_PARTY_LIBS)
-    target_link_libraries(coacd PRIVATE openvdb_static spdlog::spdlog)
-    target_compile_definitions(coacd PUBLIC WITH_3RD_PARTY_LIBS=1)
-else()
-    target_compile_definitions(coacd PUBLIC WITH_3RD_PARTY_LIBS=0)
-    target_compile_definitions(coacd PUBLIC DISABLE_SPDLOG)
+set(COACD_CDT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rd/cdt/CDT/include")
+if(COACD_USE_CDT_TRIANGULATION)
+    if(NOT EXISTS "${COACD_CDT_INCLUDE_DIR}/CDT.h")
+        message(FATAL_ERROR
+                "Missing CDT headers at ${COACD_CDT_INCLUDE_DIR}. "
+                "Initialize submodules with `git submodule update --init --recursive`, "
+                "or configure with -DCOACD_USE_CDT_TRIANGULATION=OFF.")
+    endif()
 endif()
 
 find_package(OpenMP)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(coacd PUBLIC OpenMP::OpenMP_CXX)
-endif()
-
 find_package(Threads)
-target_link_libraries(coacd PRIVATE Threads::Threads)
 
-add_library(_coacd SHARED "public/coacd.cpp")
+function(coacd_configure_target target_name)
+    set(options USE_CDT)
+    cmake_parse_arguments(COACD_TARGET "${options}" "" "" ${ARGN})
 
-if(WITH_3RD_PARTY_LIBS)
-    target_link_libraries(_coacd PRIVATE coacd spdlog::spdlog openvdb_static)
-else()
-    target_link_libraries(_coacd PRIVATE coacd)
+    target_include_directories(
+      ${target_name} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/public>
+                           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    if(COACD_TARGET_USE_CDT OR COACD_USE_CDT_TRIANGULATION)
+        target_include_directories(${target_name} PRIVATE ${COACD_CDT_INCLUDE_DIR})
+        target_compile_definitions(${target_name} PUBLIC COACD_USE_CDT_TRIANGULATION=1)
+    else()
+        target_compile_definitions(${target_name} PUBLIC COACD_USE_CDT_TRIANGULATION=0)
+    endif()
+    set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+
+    if(WITH_3RD_PARTY_LIBS)
+        target_link_libraries(${target_name} PRIVATE openvdb_static spdlog::spdlog)
+        target_compile_definitions(${target_name} PUBLIC WITH_3RD_PARTY_LIBS=1)
+    else()
+        target_compile_definitions(${target_name} PUBLIC WITH_3RD_PARTY_LIBS=0)
+        target_compile_definitions(${target_name} PUBLIC DISABLE_SPDLOG)
+    endif()
+
+    if(COACD_ENABLE_IO)
+        target_compile_definitions(${target_name} PUBLIC COACD_ENABLE_IO=1)
+    else()
+        target_compile_definitions(${target_name} PUBLIC COACD_ENABLE_IO=0)
+    endif()
+
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(${target_name} PUBLIC OpenMP::OpenMP_CXX)
+    endif()
+
+    target_link_libraries(${target_name} PUBLIC Threads::Threads)
+endfunction()
+
+set(COACD_LIBRARY_SRC ${COACD_SRC} public/coacd.cpp)
+
+add_library(coacd STATIC ${COACD_LIBRARY_SRC})
+coacd_configure_target(coacd)
+
+if(COACD_BUILD_SHARED_WRAPPER)
+    add_library(_coacd SHARED ${COACD_LIBRARY_SRC})
+    coacd_configure_target(_coacd)
 endif()
 
-add_executable(main main.cpp)
+if(COACD_BUILD_CLI)
+    if(NOT COACD_ENABLE_IO)
+        message(FATAL_ERROR "COACD_BUILD_CLI requires COACD_ENABLE_IO=ON")
+    endif()
 
-if(WITH_3RD_PARTY_LIBS)
-    target_link_libraries(main coacd spdlog::spdlog openvdb_static)
-else()
-    target_link_libraries(main coacd)
+    add_executable(main main.cpp src/io.cpp)
+    target_link_libraries(main PRIVATE coacd)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(coacd_test tests/coacd_test.cpp)
+    target_include_directories(coacd_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(coacd_test PRIVATE coacd)
+    add_test(NAME coacd.unit COMMAND coacd_test)
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/3rd/cdt/CDT/include/CDT.h")
+        add_library(coacd_cdt_testlib STATIC ${COACD_LIBRARY_SRC})
+        coacd_configure_target(coacd_cdt_testlib USE_CDT)
+
+        add_executable(clip_compare_builtin tests/clip_compare_runner.cpp)
+        target_include_directories(clip_compare_builtin PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_compile_definitions(clip_compare_builtin PRIVATE COACD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(clip_compare_builtin PRIVATE coacd)
+
+        add_executable(clip_compare_cdt tests/clip_compare_runner.cpp)
+        target_include_directories(clip_compare_cdt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_compile_definitions(clip_compare_cdt PRIVATE COACD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(clip_compare_cdt PRIVATE coacd_cdt_testlib)
+
+        add_test(
+          NAME coacd.clip_compare_examples
+          COMMAND ${CMAKE_COMMAND}
+                  -DDEFAULT_EXEC=$<TARGET_FILE:clip_compare_builtin>
+                  -DCDT_EXEC=$<TARGET_FILE:clip_compare_cdt>
+                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/compare_clip_outputs.cmake)
+    endif()
 endif()
 
 # ##############################################################################
 # Install target
 # ##############################################################################
 
+set(COACD_INSTALL_TARGETS coacd)
+if(COACD_BUILD_SHARED_WRAPPER)
+    list(APPEND COACD_INSTALL_TARGETS _coacd)
+endif()
+
 install(
-  TARGETS _coacd
+  TARGETS ${COACD_INSTALL_TARGETS}
   EXPORT CoACDTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

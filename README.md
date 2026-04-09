@@ -121,6 +121,19 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -
 cmake --build . --target main --config Release
 ```
 
+For a minimal library-only configure that disables OpenVDB/spdlog-backed preprocessing, CLI IO, and the Python shared wrapper:
+
+```
+./configure-library-build.sh
+cmake --build build-library --target coacd -j
+```
+
+The default clipping triangulation backend is the built-in ear-clipping implementation. To use the bundled CDT backend instead, configure with:
+
+```
+cmake .. -DCOACD_USE_CDT_TRIANGULATION=ON
+```
+
 ### (4) Quick start
 We provide a set of default parameters, and you only need to specify the input and output path. You can take an arbitrary mesh as input (in `.obj` format, no need to be a manifold) and run the algorithm by the following command:
 ```

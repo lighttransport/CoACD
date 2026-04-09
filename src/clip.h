@@ -3,6 +3,10 @@
 #include "model_obj.h"
 #include <deque>
 
+#ifndef COACD_USE_CDT_TRIANGULATION
+#define COACD_USE_CDT_TRIANGULATION 0
+#endif
+
 using std::deque;
 using std::endl;
 

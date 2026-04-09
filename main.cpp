@@ -7,6 +7,7 @@
 #if WITH_3RD_PARTY_LIBS
   #include "src/preprocess.h"
 #endif
+#include "src/io.h"
 #include "src/process.h"
 #include "src/logger.h"
 
