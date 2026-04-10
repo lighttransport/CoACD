@@ -2,6 +2,12 @@
 #include "mcts.h"
 #include "process.h"
 
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wunused-but-set-variable"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#endif
+
 namespace coacd
 {
     Part::Part(Params _params, Model mesh)
@@ -672,7 +678,6 @@ namespace coacd
 
     double ComputeReward(Params &params, double meshCH_v, vector<double> &current_costs, vector<Part> &current_parts, int &worst_part_idx, double ori_mesh_area, double ori_mesh_volume)
     {
-        double reward = 0;
         double h_max = 0;
         for (int i = 0; i < (int)current_costs.size(); i++)
         {
@@ -682,7 +687,6 @@ namespace coacd
                 h_max = h;
                 worst_part_idx = i;
             }
-            reward += h;
         }
 
         return h_max;

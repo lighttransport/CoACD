@@ -46,8 +46,11 @@ else()
         # macOS: add -fPIC
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
     elseif(UNIX)
-        # Linux/Unix: add -fPIC and disable -Werror=stringop-overflow
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wno-error=stringop-overflow")
+        # Linux/Unix: add -fPIC; disable GCC's -Werror=stringop-overflow (not recognized by clang)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=stringop-overflow")
+        endif()
     endif()
 endif()
 

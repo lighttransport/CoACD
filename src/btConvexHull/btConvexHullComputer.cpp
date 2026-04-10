@@ -1767,8 +1767,8 @@ static bool pointCmp(const btConvexHullInternal::Point32& p, const btConvexHullI
 void btConvexHullInternal::compute(vector<array<double, 3>> vertices)
 {
     btVector3 min(btScalar(1e30), btScalar(1e30), btScalar(1e30)), max(btScalar(-1e30), btScalar(-1e30), btScalar(-1e30));
-    size_t count = (int)vertices.size();
-    for (int32_t i = 0; i < count; i++) {
+    size_t count = vertices.size();
+    for (size_t i = 0; i < count; i++) {
         btVector3 p((btScalar)vertices[i][0], (btScalar)vertices[i][1], (btScalar)vertices[i][2]);
         min.setMin(p);
         max.setMax(p);
@@ -1801,21 +1801,21 @@ void btConvexHullInternal::compute(vector<array<double, 3>> vertices)
     center = (min + max) * btScalar(0.5);
 
     btAlignedObjectArray<Point32> points;
-    points.resize(count);
-    for (int32_t i = 0; i < count; i++) {
+    points.resize(static_cast<int>(count));
+    for (size_t i = 0; i < count; i++) {
         btVector3 p((btScalar)vertices[i][0], (btScalar)vertices[i][1], (btScalar)vertices[i][2]);
         p = (p - center) * s;
-        points[i].x = (int32_t)p[medAxis];
-        points[i].y = (int32_t)p[maxAxis];
-        points[i].z = (int32_t)p[minAxis];
-        points[i].index = i;
+        points[static_cast<int>(i)].x = (int32_t)p[medAxis];
+        points[static_cast<int>(i)].y = (int32_t)p[maxAxis];
+        points[static_cast<int>(i)].z = (int32_t)p[minAxis];
+        points[static_cast<int>(i)].index = static_cast<int>(i);
     }
     points.quickSort(pointCmp);
 
     vertexPool.reset();
-    vertexPool.setArraySize(count);
-    originalVertices.resize(count);
-    for (int32_t i = 0; i < count; i++) {
+    vertexPool.setArraySize(static_cast<int>(count));
+    originalVertices.resize(static_cast<int>(count));
+    for (size_t i = 0; i < count; i++) {
         Vertex* v = vertexPool.newObject();
         v->edges = NULL;
         v->point = points[i];
