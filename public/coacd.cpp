@@ -101,7 +101,8 @@ std::vector<Mesh> CoACD(Mesh const &input, double threshold,
 #else
   bool is_manifold = IsManifold(m);
   if (!is_manifold)
-    throw std::runtime_error("The mesh is not a 2-manifold!");
+    logger::warn("The mesh is not a 2-manifold. Preprocessing is unavailable in this build; "
+                 "results may be imprecise. Build with WITH_3RD_PARTY_LIBS for manifold preprocessing.");
 #endif
 
   if (pca) {

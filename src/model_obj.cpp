@@ -343,6 +343,22 @@ namespace coacd
         os.close();
     }
 
+    // Lightweight PCG32 PRNG — much faster than mt19937 + sobol for this use case.
+    struct PCG32 {
+        uint64_t state;
+        uint64_t inc;
+        PCG32(uint64_t seed = 0x853c49e6748fea9bULL, uint64_t seq = 0xda3e39cb94b95bdbULL)
+            : state(0), inc((seq << 1u) | 1u) { next(); state += seed; next(); }
+        uint32_t next() {
+            uint64_t oldstate = state;
+            state = oldstate * 6364136223846793005ULL + inc;
+            uint32_t xorshifted = static_cast<uint32_t>(((oldstate >> 18u) ^ oldstate) >> 27u);
+            uint32_t rot = static_cast<uint32_t>(oldstate >> 59u);
+            return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
+        }
+        float nextFloat() { return static_cast<float>(next() >> 8) * (1.0f / 16777216.0f); }
+    };
+
     void Model::ExtractPointSet(vector<vec3d> &samples, vector<int> &sample_tri_ids, unsigned int seed, size_t resolution, double base, bool flag, Plane plane)
     {
         if (resolution == 0)
@@ -355,6 +371,9 @@ namespace coacd
 
         if (base != 0)
             resolution = size_t(max(1000, int(resolution * (aObj / base))));
+
+        // Use fast PCG32 instead of mt19937 + sobol.
+        PCG32 rng(seed ^ 0x12345678u, static_cast<uint64_t>(triangles.size()));
 
         for (int i = 0; i < (int)triangles.size(); i++)
         {
@@ -371,31 +390,24 @@ namespace coacd
             else
                 N = max(int(i % 2 == 0), int(resolution / aObj * area));
 
-            std::uniform_int_distribution<int> seeder(0, 1000);
-            int seed = seeder(coacd::random_engine);
-            float r[2];
+            const vec3d &p0 = points[triangles[i][0]];
+            const vec3d &p1 = points[triangles[i][1]];
+            const vec3d &p2 = points[triangles[i][2]];
+
             for (int k = 0; k < N; k++)
             {
-                double a, b;
-                if (k % 3 == 0)
-                {
-                    std::uniform_real_distribution<double> uniform(0.0, 1.0);
-                    //// random sample
-                    a = uniform(coacd::random_engine);
-                    b = uniform(coacd::random_engine);
-                }
-                else
-                {
-                    //// quasirandom sample
-                    i4_sobol(2, &seed, r);
-                    a = r[0];
-                    b = r[1];
-                }
+                double a = rng.nextFloat();
+                double b = rng.nextFloat();
+
+                double sa = sqrt(a);
+                double w0 = 1.0 - sa;
+                double w1 = sa * (1.0 - b);
+                double w2 = sa * b;
 
                 vec3d v;
-                v[0] = (1 - sqrt(a)) * points[triangles[i][0]][0] + (sqrt(a) * (1 - b)) * points[triangles[i][1]][0] + b * sqrt(a) * points[triangles[i][2]][0];
-                v[1] = (1 - sqrt(a)) * points[triangles[i][0]][1] + (sqrt(a) * (1 - b)) * points[triangles[i][1]][1] + b * sqrt(a) * points[triangles[i][2]][1];
-                v[2] = (1 - sqrt(a)) * points[triangles[i][0]][2] + (sqrt(a) * (1 - b)) * points[triangles[i][1]][2] + b * sqrt(a) * points[triangles[i][2]][2];
+                v[0] = w0 * p0[0] + w1 * p1[0] + w2 * p2[0];
+                v[1] = w0 * p0[1] + w1 * p1[1] + w2 * p2[1];
+                v[2] = w0 * p0[2] + w1 * p1[2] + w2 * p2[2];
                 samples.push_back(v);
                 sample_tri_ids.push_back(i);
             }

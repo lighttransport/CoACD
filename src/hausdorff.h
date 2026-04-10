@@ -25,131 +25,115 @@ using namespace nanoflann;
 namespace coacd
 {
 
-    double dist_point2point(vec3d pt, vec3d p)
+    inline double dist_point2point(vec3d pt, vec3d p)
     {
-        return sqrt(pow(pt[0] - p[0], 2) + pow(pt[1] - p[1], 2) + pow(pt[2] - p[2], 2));
+        double dx = pt[0] - p[0], dy = pt[1] - p[1], dz = pt[2] - p[2];
+        return sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    double dist_point2segment(vec3d pt, vec3d s0, vec3d s1, bool flag = false)
-    {
-        // first we build a 3d triangle the compute the height, pt as the top point
-        vec3d BA, BC;
-        BA[0] = pt[0] - s1[0];
-        BA[1] = pt[1] - s1[1];
-        BA[2] = pt[2] - s1[2];
-        BC[0] = s0[0] - s1[0];
-        BC[1] = s0[1] - s1[1];
-        BC[2] = s0[2] - s1[2];
-
-        // we calculate the projected vector along the segment
-        double proj_dist = (BA[0] * BC[0] + BA[1] * BC[1] + BA[2] * BC[2]) / (sqrt(pow(BC[0], 2) + pow(BC[1], 2) + pow(BC[2], 2)));
-        if (flag)
-        {
-            vec3d proj_pt;
-            double len_BC = sqrt(pow(BC[0], 2) + pow(BC[1], 2) + pow(BC[2], 2));
-            proj_pt[0] = s1[0] + proj_dist / len_BC * BC[0];
-            proj_pt[1] = s1[1] + proj_dist / len_BC * BC[1];
-            proj_pt[2] = s1[2] + proj_dist / len_BC * BC[2];
-            cout << "v " << proj_pt[0] << ' ' << proj_pt[1] << ' ' << proj_pt[2] << endl;
-        }
-
-        // we should make sure the projected point is within the segment, otherwise not consider it
-        // if projected distance is negative or bigger than BC, it is out
-        double valAB = sqrt(pow(BA[0], 2) + pow(BA[1], 2) + pow(BA[2], 2));
-        double valBC = sqrt(pow(BC[0], 2) + pow(BC[1], 2) + pow(BC[2], 2));
-        if (proj_dist < 0 || proj_dist > valBC)
-            return INF;
-        return sqrt(pow(valAB, 2) - pow(proj_dist, 2));
-    }
-
+    // Optimized point-to-triangle distance using Voronoi region method.
+    // Avoids redundant sqrt/pow calls from the original implementation.
     double dist_point2triangle(vec3d pt, vec3d tri_pt0, vec3d tri_pt1, vec3d tri_pt2, bool flag = false)
     {
-        // calculate the funciton of the plane, n = (a, b, c)
-        double _a = (tri_pt1[1] - tri_pt0[1]) * (tri_pt2[2] - tri_pt0[2]) - (tri_pt1[2] - tri_pt0[2]) * (tri_pt2[1] - tri_pt0[1]);
-        double _b = (tri_pt1[2] - tri_pt0[2]) * (tri_pt2[0] - tri_pt0[0]) - (tri_pt1[0] - tri_pt0[0]) * (tri_pt2[2] - tri_pt0[2]);
-        double _c = (tri_pt1[0] - tri_pt0[0]) * (tri_pt2[1] - tri_pt0[1]) - (tri_pt1[1] - tri_pt0[1]) * (tri_pt2[0] - tri_pt0[0]);
-        double a = _a / sqrt(pow(_a, 2) + pow(_b, 2) + pow(_c, 2));
-        double b = _b / sqrt(pow(_a, 2) + pow(_b, 2) + pow(_c, 2));
-        double c = _c / sqrt(pow(_a, 2) + pow(_b, 2) + pow(_c, 2));
-        double d = 0 - (a * tri_pt0[0] + b * tri_pt0[1] + c * tri_pt0[2]);
+        (void)flag;
+        // Edge vectors
+        double e0[3] = {tri_pt1[0] - tri_pt0[0], tri_pt1[1] - tri_pt0[1], tri_pt1[2] - tri_pt0[2]};
+        double e1[3] = {tri_pt2[0] - tri_pt0[0], tri_pt2[1] - tri_pt0[1], tri_pt2[2] - tri_pt0[2]};
+        double v[3]  = {tri_pt0[0] - pt[0], tri_pt0[1] - pt[1], tri_pt0[2] - pt[2]};
 
-        // distance can be calculated directly using the function, then we get the projected point as well
-        double dist = fabs(a * pt[0] + b * pt[1] + c * pt[2] + d) / sqrt(pow(a, 2) + pow(b, 2) + pow(c, 2));
-        vec3d proj_pt;
-        Plane p = Plane(a, b, c, d);
-        short side = p.Side(pt, 1e-8);
-        if (side == 1)
-        {
-            proj_pt[0] = pt[0] - a * dist;
-            proj_pt[1] = pt[1] - b * dist;
-            proj_pt[2] = pt[2] - c * dist;
+        double a = e0[0]*e0[0] + e0[1]*e0[1] + e0[2]*e0[2];
+        double b = e0[0]*e1[0] + e0[1]*e1[1] + e0[2]*e1[2];
+        double c = e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2];
+        double d = e0[0]*v[0]  + e0[1]*v[1]  + e0[2]*v[2];
+        double e = e1[0]*v[0]  + e1[1]*v[1]  + e1[2]*v[2];
+
+        double det = a * c - b * b;
+        double s = b * e - c * d;
+        double t = b * d - a * e;
+
+        if (s + t <= det) {
+            if (s < 0.0) {
+                if (t < 0.0) {
+                    // Region 4
+                    if (d < 0.0) { s = (-d >= a) ? 1.0 : -d / a; t = 0.0; }
+                    else { s = 0.0; t = (e >= 0.0) ? 0.0 : ((-e >= c) ? 1.0 : -e / c); }
+                } else {
+                    // Region 3
+                    s = 0.0; t = (e >= 0.0) ? 0.0 : ((-e >= c) ? 1.0 : -e / c);
+                }
+            } else if (t < 0.0) {
+                // Region 5
+                t = 0.0; s = (d >= 0.0) ? 0.0 : ((-d >= a) ? 1.0 : -d / a);
+            } else {
+                // Region 0 (interior)
+                double inv = 1.0 / det;
+                s *= inv; t *= inv;
+            }
+        } else {
+            if (s < 0.0) {
+                // Region 2
+                double tmp0 = b + d, tmp1 = c + e;
+                if (tmp1 > tmp0) { double numer = tmp1 - tmp0, denom = a - 2*b + c; s = (numer >= denom) ? 1.0 : numer / denom; t = 1.0 - s; }
+                else { s = 0.0; t = (tmp1 <= 0.0) ? 1.0 : ((e >= 0.0) ? 0.0 : -e / c); }
+            } else if (t < 0.0) {
+                // Region 6
+                double tmp0 = b + e, tmp1 = a + d;
+                if (tmp1 > tmp0) { double numer = tmp1 - tmp0, denom = a - 2*b + c; t = (numer >= denom) ? 1.0 : numer / denom; s = 1.0 - t; }
+                else { t = 0.0; s = (tmp1 <= 0.0) ? 1.0 : ((d >= 0.0) ? 0.0 : -d / a); }
+            } else {
+                // Region 1
+                double numer = (c + e) - (b + d);
+                if (numer <= 0.0) { s = 0.0; t = 1.0; }
+                else { double denom = a - 2*b + c; s = (numer >= denom) ? 1.0 : numer / denom; t = 1.0 - s; }
+            }
         }
-        else if (side == -1)
-        {
-            proj_pt[0] = pt[0] + a * dist;
-            proj_pt[1] = pt[1] + b * dist;
-            proj_pt[2] = pt[2] + c * dist;
+
+        double dx = v[0] + s * e0[0] + t * e1[0];
+        double dy = v[1] + s * e0[1] + t * e1[1];
+        double dz = v[2] + s * e0[2] + t * e1[2];
+        return sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // Squared distance variant — avoids sqrt in inner loops.
+    inline double dist_point2triangle_sq(const vec3d &pt, const vec3d &tri_pt0, const vec3d &tri_pt1, const vec3d &tri_pt2)
+    {
+        double e0[3] = {tri_pt1[0] - tri_pt0[0], tri_pt1[1] - tri_pt0[1], tri_pt1[2] - tri_pt0[2]};
+        double e1[3] = {tri_pt2[0] - tri_pt0[0], tri_pt2[1] - tri_pt0[1], tri_pt2[2] - tri_pt0[2]};
+        double v[3]  = {tri_pt0[0] - pt[0], tri_pt0[1] - pt[1], tri_pt0[2] - pt[2]};
+
+        double a = e0[0]*e0[0] + e0[1]*e0[1] + e0[2]*e0[2];
+        double b = e0[0]*e1[0] + e0[1]*e1[1] + e0[2]*e1[2];
+        double c = e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2];
+        double d = e0[0]*v[0]  + e0[1]*v[1]  + e0[2]*v[2];
+        double e = e1[0]*v[0]  + e1[1]*v[1]  + e1[2]*v[2];
+
+        double det = a * c - b * b;
+        double s = b * e - c * d;
+        double t = b * d - a * e;
+
+        if (s + t <= det) {
+            if (s < 0.0) {
+                if (t < 0.0) { if (d < 0.0) { s = (-d >= a) ? 1.0 : -d / a; t = 0.0; } else { s = 0.0; t = (e >= 0.0) ? 0.0 : ((-e >= c) ? 1.0 : -e / c); } }
+                else { s = 0.0; t = (e >= 0.0) ? 0.0 : ((-e >= c) ? 1.0 : -e / c); }
+            } else if (t < 0.0) { t = 0.0; s = (d >= 0.0) ? 0.0 : ((-d >= a) ? 1.0 : -d / a); }
+            else { double inv = 1.0 / det; s *= inv; t *= inv; }
+        } else {
+            if (s < 0.0) { double tmp0 = b + d, tmp1 = c + e; if (tmp1 > tmp0) { double numer = tmp1 - tmp0, denom = a - 2*b + c; s = (numer >= denom) ? 1.0 : numer / denom; t = 1.0 - s; } else { s = 0.0; t = (tmp1 <= 0.0) ? 1.0 : ((e >= 0.0) ? 0.0 : -e / c); } }
+            else if (t < 0.0) { double tmp0 = b + e, tmp1 = a + d; if (tmp1 > tmp0) { double numer = tmp1 - tmp0, denom = a - 2*b + c; t = (numer >= denom) ? 1.0 : numer / denom; s = 1.0 - t; } else { t = 0.0; s = (tmp1 <= 0.0) ? 1.0 : ((d >= 0.0) ? 0.0 : -d / a); } }
+            else { double numer = (c + e) - (b + d); if (numer <= 0.0) { s = 0.0; t = 1.0; } else { double denom = a - 2*b + c; s = (numer >= denom) ? 1.0 : numer / denom; t = 1.0 - s; } }
         }
-        else
-        {
-            proj_pt = pt;
-        }
 
-        // judge if the projected point is within the triangle
-        // we calculate the cross product of each edge and the line with the point, to see if the results are all along the normal direction
-        vec3d normal = CalFaceNormal(tri_pt0, tri_pt1, tri_pt2);
-        vec3d AB, BC, CA, AP, BP, CP;
-        AB[0] = tri_pt1[0] - tri_pt0[0];
-        AB[1] = tri_pt1[1] - tri_pt0[1];
-        AB[2] = tri_pt1[2] - tri_pt0[2];
-        BC[0] = tri_pt2[0] - tri_pt1[0];
-        BC[1] = tri_pt2[1] - tri_pt1[1];
-        BC[2] = tri_pt2[2] - tri_pt1[2];
-        CA[0] = tri_pt0[0] - tri_pt2[0];
-        CA[1] = tri_pt0[1] - tri_pt2[1];
-        CA[2] = tri_pt0[2] - tri_pt2[2];
-        AP[0] = proj_pt[0] - tri_pt0[0];
-        AP[1] = proj_pt[1] - tri_pt0[1];
-        AP[2] = proj_pt[2] - tri_pt0[2];
-        BP[0] = proj_pt[0] - tri_pt1[0];
-        BP[1] = proj_pt[1] - tri_pt1[1];
-        BP[2] = proj_pt[2] - tri_pt1[2];
-        CP[0] = proj_pt[0] - tri_pt2[0];
-        CP[1] = proj_pt[1] - tri_pt2[1];
-        CP[2] = proj_pt[2] - tri_pt2[2];
-
-        vec3d AB_AP = CrossProduct(AB, AP);
-        vec3d BC_BP = CrossProduct(BC, BP);
-        vec3d CA_CP = CrossProduct(CA, CP);
-
-        // if all the cross product are parallel with normal, then the projected point is within the triangle
-        // else, we should calculate the shortest distance to three edges
-        if (SameVectorDirection(AB_AP, normal) && SameVectorDirection(BC_BP, normal) && SameVectorDirection(CA_CP, normal))
-        {
-            return dist;
-        }
-        else // if not within the triangle, we calculate the distance to 3 edges and 3 points and use the min
-        {
-            double dist_pt2AB = dist_point2segment(pt, tri_pt0, tri_pt1, flag);
-            double dist_pt2BC = dist_point2segment(pt, tri_pt1, tri_pt2, flag);
-            double dist_pt2CA = dist_point2segment(pt, tri_pt2, tri_pt0, flag);
-            double dist_pt2A = dist_point2point(pt, tri_pt0);
-            double dist_pt2B = dist_point2point(pt, tri_pt1);
-            double dist_pt2C = dist_point2point(pt, tri_pt2);
-
-            if (flag)
-                cout << dist_pt2AB << ' ' << dist_pt2BC << ' ' << dist_pt2CA << ' '
-                     << dist_pt2A << ' ' << dist_pt2B << ' ' << dist_pt2C << endl;
-
-            return min(min(min(dist_pt2AB, dist_pt2BC), dist_pt2CA),
-                       min(min(dist_pt2A, dist_pt2B), dist_pt2C));
-        }
+        double dx = v[0] + s * e0[0] + t * e1[0];
+        double dy = v[1] + s * e0[1] + t * e1[1];
+        double dz = v[2] + s * e0[2] + t * e1[2];
+        return dx * dx + dy * dy + dz * dz;
     }
 
     double face_hausdorff_distance(Model &meshA, vector<vec3d> &XA, vector<int> &idA, Model &meshB, vector<vec3d> &XB, vector<int> &idB, bool flag = false)
     {
-        int nA = XA.size();
-        int nB = XB.size();
+        (void)flag;
+        int nA = static_cast<int>(XA.size());
+        int nB = static_cast<int>(XB.size());
         double cmax = 0;
 
         PointCloud<double> cloudA, cloudB;
@@ -168,28 +152,31 @@ namespace coacd
         indexA.buildIndex();
         indexB.buildIndex();
 
+        // Stack-allocated KNN result buffers (avoids per-query heap allocation)
+        constexpr size_t K = 10;
+        size_t ret_index[K];
+        double out_dist_sqr[K];
+
+        // Use squared distances in inner loop; sqrt only the final cmin per query.
         for (int i = 0; i < nB; i++)
         {
-            size_t num_results = 10;
             double query_pt[3] = {XB[i][0], XB[i][1], XB[i][2]};
+            size_t num_results = indexA.knnSearch(&query_pt[0], K, &ret_index[0], &out_dist_sqr[0]);
 
-            std::vector<size_t> ret_index(num_results);
-            std::vector<double> out_dist_sqr(num_results);
-
-            num_results = indexA.knnSearch(&query_pt[0], num_results, &ret_index[0], &out_dist_sqr[0]);
-
-            double cmin = INF;
-            for (int j = 0; j < (int)num_results; j++)
+            double cmin_sq = INF;
+            for (size_t j = 0; j < num_results; j++)
             {
-                double distance;
-                distance = dist_point2triangle(XB[i], meshA.points[meshA.triangles[idA[ret_index[j]]][0]], meshA.points[meshA.triangles[idA[ret_index[j]]][1]], meshA.points[meshA.triangles[idA[ret_index[j]]][2]]);
-                if (distance < cmin)
+                double dsq = dist_point2triangle_sq(XB[i],
+                    meshA.points[meshA.triangles[idA[ret_index[j]]][0]],
+                    meshA.points[meshA.triangles[idA[ret_index[j]]][1]],
+                    meshA.points[meshA.triangles[idA[ret_index[j]]][2]]);
+                if (dsq < cmin_sq)
                 {
-                    cmin = distance;
-                    if (cmin < 1e-14)
-                        break;
+                    cmin_sq = dsq;
+                    if (cmin_sq < 1e-28) break;
                 }
             }
+            double cmin = sqrt(cmin_sq);
             if (cmin > 10)
                 cmin = sqrt(out_dist_sqr[0]);
             if (cmin > cmax && INF > cmin)
@@ -198,27 +185,23 @@ namespace coacd
 
         for (int i = 0; i < nA; i++)
         {
-            size_t num_results = 10;
-
             double query_pt[3] = {XA[i][0], XA[i][1], XA[i][2]};
+            size_t num_results = indexB.knnSearch(&query_pt[0], K, &ret_index[0], &out_dist_sqr[0]);
 
-            std::vector<size_t> ret_index(num_results);
-            std::vector<double> out_dist_sqr(num_results);
-
-            num_results = indexB.knnSearch(&query_pt[0], num_results, &ret_index[0], &out_dist_sqr[0]);
-
-            double cmin = INF;
-            for (int j = 0; j < (int)num_results; j++)
+            double cmin_sq = INF;
+            for (size_t j = 0; j < num_results; j++)
             {
-                double distance;
-                distance = dist_point2triangle(XA[i], meshB.points[meshB.triangles[idB[ret_index[j]]][0]], meshB.points[meshB.triangles[idB[ret_index[j]]][1]], meshB.points[meshB.triangles[idB[ret_index[j]]][2]]);
-                if (distance < cmin)
+                double dsq = dist_point2triangle_sq(XA[i],
+                    meshB.points[meshB.triangles[idB[ret_index[j]]][0]],
+                    meshB.points[meshB.triangles[idB[ret_index[j]]][1]],
+                    meshB.points[meshB.triangles[idB[ret_index[j]]][2]]);
+                if (dsq < cmin_sq)
                 {
-                    cmin = distance;
-                    if (cmin < 1e-14)
-                        break;
+                    cmin_sq = dsq;
+                    if (cmin_sq < 1e-28) break;
                 }
             }
+            double cmin = sqrt(cmin_sq);
             if (cmin > 10)
                 cmin = sqrt(out_dist_sqr[0]);
             if (cmin > cmax && INF > cmin)

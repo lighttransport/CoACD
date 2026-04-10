@@ -10,7 +10,7 @@ namespace coacd
         vector<vec3d> overlap;
         vector<vec3i> border_triangles, final_triangles;
         vector<pair<int, int>> border_edges;
-        map<int, int> border_map;
+        std::unordered_map<int, int> border_map;
         vector<vec3d> final_border;
 
         const int N = (int)mesh.points.size();
@@ -18,8 +18,8 @@ namespace coacd
         vector<bool> pos_map(N);
         vector<bool> neg_map(N);
 
-        map<pair<int, int>, int> edge_map;
-        map<int, int> vertex_map;
+        EdgeMap<int> edge_map;
+        std::unordered_map<int, int> vertex_map;
 
         for (int i = 0; i < (int)mesh.triangles.size(); i++)
         {
@@ -368,44 +368,47 @@ namespace coacd
             short flag = Triangulation(border, border_edges, border_triangles, plane);
             if (flag == 0)
             {
-#if COACD_USE_CDT_TRIANGULATION
-                RemoveOutlierTriangles(border, overlap, border_edges, border_triangles, oriN, border_map, final_border, final_triangles);
-#else
-                (void)overlap;
-                (void)oriN;
-                final_border.clear();
-                border_map.clear();
-                for (int i = 0; i < (int)border.size(); ++i)
+                if (UseCDT())
                 {
-                    int mapped_index = -1;
-                    for (int j = 0; j < (int)final_border.size(); ++j)
+                    RemoveOutlierTriangles(border, overlap, border_edges, border_triangles, oriN, border_map, final_border, final_triangles);
+                }
+                else
+                {
+                    (void)overlap;
+                    (void)oriN;
+                    final_border.clear();
+                    border_map.clear();
+                    for (int i = 0; i < (int)border.size(); ++i)
                     {
-                        if (SamePointDetect(border[i], final_border[j]))
+                        int mapped_index = -1;
+                        for (int j = 0; j < (int)final_border.size(); ++j)
                         {
-                            mapped_index = j + 1;
-                            break;
+                            if (SamePointDetect(border[i], final_border[j]))
+                            {
+                                mapped_index = j + 1;
+                                break;
+                            }
                         }
+
+                        if (mapped_index < 0)
+                        {
+                            final_border.push_back(border[i]);
+                            mapped_index = static_cast<int>(final_border.size());
+                        }
+
+                        border_map[i + 1] = mapped_index;
                     }
 
-                    if (mapped_index < 0)
+                    final_triangles = border_triangles;
+                    for (vec3i &triangle : final_triangles)
                     {
-                        final_border.push_back(border[i]);
-                        mapped_index = static_cast<int>(final_border.size());
+                        triangle = {
+                            border_map[triangle[0]],
+                            border_map[triangle[1]],
+                            border_map[triangle[2]],
+                        };
                     }
-
-                    border_map[i + 1] = mapped_index;
                 }
-
-                final_triangles = border_triangles;
-                for (vec3i &triangle : final_triangles)
-                {
-                    triangle = {
-                        border_map[triangle[0]],
-                        border_map[triangle[1]],
-                        border_map[triangle[2]],
-                    };
-                }
-#endif
             }
             else if (flag == 1)
             {
@@ -548,15 +551,18 @@ namespace coacd
         {
             cut_area += Area(final_border[final_triangles[i][0] - 1], final_border[final_triangles[i][1] - 1], final_border[final_triangles[i][2] - 1]);
             int a, b, c;
-#if COACD_USE_CDT_TRIANGULATION
-            a = border_map[final_triangles[i][0]];
-            b = border_map[final_triangles[i][1]];
-            c = border_map[final_triangles[i][2]];
-#else
-            a = final_triangles[i][0];
-            b = final_triangles[i][1];
-            c = final_triangles[i][2];
-#endif
+            if (UseCDT())
+            {
+                a = border_map[final_triangles[i][0]];
+                b = border_map[final_triangles[i][1]];
+                c = border_map[final_triangles[i][2]];
+            }
+            else
+            {
+                a = final_triangles[i][0];
+                b = final_triangles[i][1];
+                c = final_triangles[i][2];
+            }
             if (cap_aligns_with_plane)
             {
                 pos.triangles.push_back({pos_N + c - 1, pos_N + b - 1, pos_N + a - 1});

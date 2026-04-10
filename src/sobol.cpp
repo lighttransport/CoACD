@@ -135,26 +135,26 @@ int i4_bit_lo0 ( int n )
 //    Output, int I4_BIT_LO0, the position of the low 1 bit.
 //
 {
-  int bit;
+  // Find position of lowest 0-bit (1-based).
+  // ~n flips bits, then ctz finds the lowest set bit = lowest 0-bit of n.
+  if (n == -1) return 32;  // all bits set
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_ctz(static_cast<unsigned int>(~n)) + 1;
+#elif defined(_MSC_VER)
+  unsigned long idx;
+  _BitScanForward(&idx, static_cast<unsigned long>(~n));
+  return static_cast<int>(idx) + 1;
+#else
+  int bit = 0;
   int n2;
-
-  bit = 0;
-
-  while ( true )
-  {
+  while (true) {
     bit = bit + 1;
     n2 = n / 2;
-
-    if ( n == 2 * n2 )
-    {
-      break;
-    }
-
+    if (n == 2 * n2) break;
     n = n2;
-
   }
-
   return bit;
+#endif
 }
 //****************************************************************************80
 

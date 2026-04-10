@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -11,13 +12,46 @@
 #include <sstream>
 #include <stdexcept>
 
-#if COACD_USE_CDT_TRIANGULATION
+// Always include CDT headers when runtime selection is enabled.
+#if COACD_USE_CDT_TRIANGULATION || COACD_CLIP_TRIANGULATION_RUNTIME
 #include "CDT.h"
 #include "CDTUtils.h"
 #endif
 
 namespace coacd
 {
+
+#if COACD_CLIP_TRIANGULATION_RUNTIME
+static std::atomic<ClipTriangulationMethod> g_clipTriangulationMethod{kClipTriangulationDefault};
+
+void SetClipTriangulationMethod(ClipTriangulationMethod method) {
+    g_clipTriangulationMethod.store(method, std::memory_order_relaxed);
+}
+
+ClipTriangulationMethod GetClipTriangulationMethod() {
+    return g_clipTriangulationMethod.load(std::memory_order_relaxed);
+}
+
+bool UseCDT() {
+    ClipTriangulationMethod m = GetClipTriangulationMethod();
+    if (m == kClipTriangulationCDT) return true;
+    if (m == kClipTriangulationBuiltin) return false;
+    // Default: follow compile-time setting
+#if COACD_USE_CDT_TRIANGULATION
+    return true;
+#else
+    return false;
+#endif
+}
+#else
+bool UseCDT() {
+#if COACD_USE_CDT_TRIANGULATION
+    return true;
+#else
+    return false;
+#endif
+}
+#endif
     namespace
     {
         using vec2d = std::array<double, 2>;
@@ -819,139 +853,144 @@ namespace coacd
             points.push_back({px, py});
         }
 
-#if COACD_USE_CDT_TRIANGULATION
-        int borderN = (int)points.size();
-        CDT::Triangulation<double> cdt(
-            CDT::detail::defaults::vertexInsertionOrder,
-            CDT::IntersectingConstraintEdges::TryResolve,
-            5e-17);
+        if (UseCDT())
+        {
+            // CDT (Constrained Delaunay Triangulation) path
+            int borderN = (int)points.size();
+            CDT::Triangulation<double> cdt(
+                CDT::detail::defaults::vertexInsertionOrder,
+                CDT::IntersectingConstraintEdges::TryResolve,
+                5e-17);
 
-        try
-        {
-            cdt.insertVertices(
-                points.begin(),
-                points.end(),
-                [](const std::array<double, 2> &p)
-                { return p[0]; },
-                [](const std::array<double, 2> &p)
-                { return p[1]; });
-            cdt.insertEdges(
-                border_edges.begin(),
-                border_edges.end(),
-                [](const std::pair<int, int> &p)
-                { return (int)p.first - 1; },
-                [](const std::pair<int, int> &p)
-                { return (int)p.second - 1; });
-            cdt.eraseSuperTriangle();
-        }
-        catch (const std::runtime_error &e)
-        {
-            (void)e;
-            return 2;
-        }
-
-        for (size_t i = 0; i < (size_t)cdt.triangles.size(); i++)
-        {
-            border_triangles.push_back({(int)cdt.triangles[i].vertices[0] + 1,
-                                        (int)cdt.triangles[i].vertices[1] + 1,
-                                        (int)cdt.triangles[i].vertices[2] + 1});
-        }
-
-        for (int i = (int)border.size(); i < borderN; i++)
-        {
-            double x, y, z;
-            CDT::V2d<double> vertex = cdt.vertices[i];
-            x = R[0][0] * vertex.x + R[1][0] * vertex.y + T[0];
-            y = R[0][1] * vertex.x + R[1][1] * vertex.y + T[1];
-            z = R[0][2] * vertex.x + R[1][2] * vertex.y + T[2];
-            border.push_back({x, y, z});
-        }
-
-        return 0;
-#else
-        vector<vec2d> merged_points;
-        vector<int> merged_to_border;
-        vector<int> border_to_merged(points.size(), -1);
-        for (size_t i = 0; i < points.size(); ++i)
-        {
-            int merged_index = -1;
-            for (size_t j = 0; j < merged_points.size(); ++j)
+            try
             {
-                if (SamePoint2D(points[i], merged_points[j]))
+                cdt.insertVertices(
+                    points.begin(),
+                    points.end(),
+                    [](const std::array<double, 2> &p)
+                    { return p[0]; },
+                    [](const std::array<double, 2> &p)
+                    { return p[1]; });
+                cdt.insertEdges(
+                    border_edges.begin(),
+                    border_edges.end(),
+                    [](const std::pair<int, int> &p)
+                    { return (int)p.first - 1; },
+                    [](const std::pair<int, int> &p)
+                    { return (int)p.second - 1; });
+                cdt.eraseSuperTriangle();
+            }
+            catch (const std::runtime_error &e)
+            {
+                (void)e;
+                return 2;
+            }
+
+            for (size_t i = 0; i < (size_t)cdt.triangles.size(); i++)
+            {
+                border_triangles.push_back({(int)cdt.triangles[i].vertices[0] + 1,
+                                            (int)cdt.triangles[i].vertices[1] + 1,
+                                            (int)cdt.triangles[i].vertices[2] + 1});
+            }
+
+            for (int i = (int)border.size(); i < borderN; i++)
+            {
+                double x, y, z;
+                CDT::V2d<double> vertex = cdt.vertices[i];
+                x = R[0][0] * vertex.x + R[1][0] * vertex.y + T[0];
+                y = R[0][1] * vertex.x + R[1][1] * vertex.y + T[1];
+                z = R[0][2] * vertex.x + R[1][2] * vertex.y + T[2];
+                border.push_back({x, y, z});
+            }
+
+            return 0;
+        }
+        else
+        {
+            // Built-in ear clipping path
+            vector<vec2d> merged_points;
+            vector<int> merged_to_border;
+            vector<int> border_to_merged(points.size(), -1);
+            for (size_t i = 0; i < points.size(); ++i)
+            {
+                int merged_index = -1;
+                for (size_t j = 0; j < merged_points.size(); ++j)
                 {
-                    merged_index = static_cast<int>(j);
-                    break;
+                    if (SamePoint2D(points[i], merged_points[j]))
+                    {
+                        merged_index = static_cast<int>(j);
+                        break;
+                    }
+                }
+
+                if (merged_index < 0)
+                {
+                    merged_index = static_cast<int>(merged_points.size());
+                    merged_points.push_back(points[i]);
+                    merged_to_border.push_back(static_cast<int>(i) + 1);
+                }
+
+                border_to_merged[i] = merged_index + 1;
+            }
+
+            vector<pair<int, int>> merged_edges;
+            merged_edges.reserve(border_edges.size());
+            for (const auto &edge : border_edges)
+            {
+                const int a = border_to_merged[edge.first - 1];
+                const int b = border_to_merged[edge.second - 1];
+                if (a != b)
+                    merged_edges.push_back({a, b});
+            }
+
+            vector<vector<int>> simple_cycles =
+                ExtractPlanarBoundaryCycles(merged_points, merged_edges);
+            if (TriangulationDebugEnabled())
+            {
+                std::cerr << "builtin triangulation: border=" << border.size()
+                          << " merged_border=" << merged_points.size()
+                          << " input_edges=" << border_edges.size()
+                          << " merged_edges=" << merged_edges.size()
+                          << " cycles=" << simple_cycles.size() << '\n';
+                for (size_t i = 0; i < simple_cycles.size(); ++i)
+                    std::cerr << "  cycle[" << i << "] size=" << simple_cycles[i].size() << '\n';
+            }
+            if (simple_cycles.empty())
+                return 2;
+
+            vector<vec3i> merged_triangles;
+            const bool success =
+                TriangulateCyclesWithEarClipping(merged_points, simple_cycles, merged_triangles);
+            if (!success && TriangulationDebugEnabled())
+                std::cerr << "builtin triangulation: ear clipping failed\n";
+
+            if (success)
+            {
+                border_triangles.reserve(merged_triangles.size());
+                for (const vec3i &triangle : merged_triangles)
+                {
+                    border_triangles.push_back({
+                        merged_to_border[triangle[0] - 1],
+                        merged_to_border[triangle[1] - 1],
+                        merged_to_border[triangle[2] - 1],
+                    });
                 }
             }
 
-            if (merged_index < 0)
-            {
-                merged_index = static_cast<int>(merged_points.size());
-                merged_points.push_back(points[i]);
-                merged_to_border.push_back(static_cast<int>(i) + 1);
-            }
-
-            border_to_merged[i] = merged_index + 1;
+            return success ? 0 : 2;
         }
-
-        vector<pair<int, int>> merged_edges;
-        merged_edges.reserve(border_edges.size());
-        for (const auto &edge : border_edges)
-        {
-            const int a = border_to_merged[edge.first - 1];
-            const int b = border_to_merged[edge.second - 1];
-            if (a != b)
-                merged_edges.push_back({a, b});
-        }
-
-        vector<vector<int>> simple_cycles =
-            ExtractPlanarBoundaryCycles(merged_points, merged_edges);
-        if (TriangulationDebugEnabled())
-        {
-            std::cerr << "builtin triangulation: border=" << border.size()
-                      << " merged_border=" << merged_points.size()
-                      << " input_edges=" << border_edges.size()
-                      << " merged_edges=" << merged_edges.size()
-                      << " cycles=" << simple_cycles.size() << '\n';
-            for (size_t i = 0; i < simple_cycles.size(); ++i)
-                std::cerr << "  cycle[" << i << "] size=" << simple_cycles[i].size() << '\n';
-        }
-        if (simple_cycles.empty())
-            return 2;
-
-        vector<vec3i> merged_triangles;
-        const bool success =
-            TriangulateCyclesWithEarClipping(merged_points, simple_cycles, merged_triangles);
-        if (!success && TriangulationDebugEnabled())
-            std::cerr << "builtin triangulation: ear clipping failed\n";
-
-        if (success)
-        {
-            border_triangles.reserve(merged_triangles.size());
-            for (const vec3i &triangle : merged_triangles)
-            {
-                border_triangles.push_back({
-                    merged_to_border[triangle[0] - 1],
-                    merged_to_border[triangle[1] - 1],
-                    merged_to_border[triangle[2] - 1],
-                });
-            }
-        }
-
-        return success ? 0 : 2;
-#endif
     }
 
     void RemoveOutlierTriangles(const vector<vec3d> &border, const vector<vec3d> &overlap,
                                 const vector<pair<int, int>> &border_edges, const vector<vec3i> &border_triangles,
-                                int oriN, map<int, int> &vertex_map, vector<vec3d> &final_border,
+                                int oriN, std::unordered_map<int, int> &vertex_map, vector<vec3d> &final_border,
                                 vector<vec3i> &final_triangles)
     {
         deque<pair<int, int>> BFS_edges(border_edges.begin(), border_edges.end());
-        map<pair<int, int>, pair<int, int>> edge_map;
+        EdgeMap<pair<int, int>> edge_map;
         map<pair<int, int>, bool> border_map;
         map<pair<int, int>, bool> same_edge_map;
-        map<int, bool> overlap_map;
+        std::unordered_map<int, bool> overlap_map;
         const int v_lenth = (int)border.size();
         const int f_lenth = (int)border_triangles.size();
         bool *add_vertex = new bool[v_lenth]();
