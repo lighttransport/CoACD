@@ -4,6 +4,7 @@
 #include <spdlog/spdlog.h>
 #else
 #include <iostream>
+#include <sstream>
 #endif
 #include <string_view>
 namespace coacd
@@ -14,12 +15,25 @@ namespace coacd
         #ifndef DISABLE_SPDLOG
         std::shared_ptr<spdlog::logger> get();
         #else
+        // Minimal {}-style format: replaces each {} or {:.Xf} placeholder
+        // with the next argument, printed via operator<<.
+        inline void fmtApply(std::ostream& out, std::string_view fmt) {
+            out << fmt;
+        }
         template <typename Arg, typename... Args>
-        void doPrint(std::ostream& out, Arg&& arg, Args&&... args)
-        {
-            out << std::forward<Arg>(arg);
-            using expander = int[];
-            (void)expander{0, (void(out << ',' << std::forward<Args>(args)), 0)...};
+        void fmtApply(std::ostream& out, std::string_view fmt, const Arg& arg, const Args&... rest) {
+            auto pos = fmt.find('{');
+            if (pos == std::string_view::npos) { out << fmt; return; }
+            out << fmt.substr(0, pos);
+            // Skip past the closing '}'
+            auto end = fmt.find('}', pos);
+            if (end == std::string_view::npos) { out << arg; return; }
+            out << arg;
+            fmtApply(out, fmt.substr(end + 1), rest...);
+        }
+        template <typename... Args>
+        void doPrint(std::ostream& out, std::string_view fmt, const Args&... args) {
+            fmtApply(out, fmt, args...);
             out << std::endl;
         }
         #endif
