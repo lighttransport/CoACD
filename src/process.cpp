@@ -499,7 +499,7 @@ namespace coacd
                     // MCTS for cutting plane
                     Node *node = new Node(params);
                     State state(params, pmesh);
-                    node->set_state(state);
+                    node->set_state(std::move(state));
                     Node *best_next_node = MonteCarloTreeSearch(params, node, best_path);
                     if (best_next_node == NULL)
                     {

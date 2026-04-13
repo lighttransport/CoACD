@@ -17,14 +17,17 @@ namespace coacd
         next_choice = 0;
         ComputeAxesAlignedClippingPlanes(mesh, params.mcts_nodes, available_moves, true);
     }
-    Part Part::operator=(const Part &_part)
+    Part &Part::operator=(const Part &_part)
     {
+        // NOTE: previously returned `Part` by value, which forced a
+        // second full deep copy (of *this) into the return temporary
+        // on every assignment. Returning a reference removes that.
+        if (this == &_part) return *this;
         params = _part.params;
         current_mesh = _part.current_mesh;
         next_choice = _part.next_choice;
         available_moves = _part.available_moves;
-
-        return (*this);
+        return *this;
     }
     Plane Part::get_one_move()
     {
@@ -65,14 +68,16 @@ namespace coacd
         ori_meshCH_volume = MeshVolume(ch);
         current_cost = 0; // accumulated score
     }
-    State::State(Params _params, vector<double> &_current_costs, vector<Part> &_current_parts, Model &_initial_part)
+    State::State(Params _params, vector<double> _current_costs, vector<Part> _current_parts, const Model &_initial_part)
     {
         params = _params;
         terminal_threshold = params.threshold;
         current_score = INF;
         current_round = 0;
-        current_costs = _current_costs;
-        current_parts = _current_parts;
+        // Move from the by-value parameter vectors so we inherit their
+        // storage rather than deep-copying it.
+        current_costs = std::move(_current_costs);
+        current_parts = std::move(_current_parts);
         worst_part_idx = 0;
         initial_part = _initial_part;
         ori_mesh_area = MeshArea(initial_part);
@@ -82,8 +87,12 @@ namespace coacd
         ori_meshCH_volume = MeshVolume(ch);
         current_cost = 0;
     }
-    State State::operator=(const State &_state)
+    State &State::operator=(const State &_state)
     {
+        // Previously returned `State` by value — that caused a second
+        // deep copy of *this into the return temporary on every
+        // assignment, doubling MCTS state-propagation cost.
+        if (this == &_state) return *this;
         params = _state.params;
         terminal_threshold = _state.terminal_threshold;
         current_value = _state.current_value;
@@ -97,8 +106,7 @@ namespace coacd
         ori_mesh_area = _state.ori_mesh_area;
         ori_mesh_volume = _state.ori_mesh_volume;
         ori_meshCH_volume = _state.ori_meshCH_volume;
-
-        return (*this);
+        return *this;
     }
 
     void State::set_current_value(pair<Plane, int> value)
@@ -141,6 +149,8 @@ namespace coacd
         bool flag = Clip(current_parts[worst_part_idx].current_mesh, pos, neg, cutting_plane, cut_area);
         if (!flag)
         {
+            // We still need current_costs/current_parts intact after
+            // this call, so these must be copies, not moves.
             State next_state(params, current_costs, current_parts, initial_part);
             next_state.current_cost = INF;
             next_state.current_round = params.mcts_max_depth;
@@ -151,6 +161,8 @@ namespace coacd
         {
             vector<double> _current_costs;
             vector<Part> _current_parts;
+            _current_costs.reserve(current_costs.size() + 1);
+            _current_parts.reserve(current_parts.size() + 1);
             for (int i = 0; i < (int)current_parts.size(); i++)
             {
                 if (i != worst_part_idx)
@@ -165,14 +177,15 @@ namespace coacd
             double cost_neg = ComputeRv(neg, negCH, params.rv_k);
             Part part_pos(params, pos);
             Part part_neg(params, neg);
-            _current_parts.push_back(part_pos);
-            _current_parts.push_back(part_neg);
+            _current_parts.push_back(std::move(part_pos));
+            _current_parts.push_back(std::move(part_neg));
             _current_costs.push_back(cost_pos);
             _current_costs.push_back(cost_neg);
 
-            State next_state(params, _current_costs, _current_parts, initial_part);
-            _current_costs.clear();
-            _current_parts.clear();
+            // Move the locals into the new State — we have no further
+            // use for them in this scope.
+            State next_state(params, std::move(_current_costs),
+                             std::move(_current_parts), initial_part);
 
             next_state.current_value = make_pair(cutting_plane, worst_part_idx);
             double single_reward = next_state.compute_reward();
@@ -197,21 +210,27 @@ namespace coacd
         if (state != NULL)
             delete state;
     }
-    Node Node::operator=(const Node &_node)
+    Node &Node::operator=(const Node &_node)
     {
+        if (this == &_node) return *this;
         params = _node.params;
         children = _node.children;
         visit_times = _node.visit_times;
         quality_value = _node.quality_value;
         state = _node.state;
         parent = _node.parent;
-
-        return (*this);
+        return *this;
     }
     void Node::set_state(State _state)
     {
-        state = new State(params);
-        *state = _state;
+        // _state is taken by value so callers may `std::move` a temporary
+        // into us; we then move it once more into our owned State.
+        // Previous code did two full deep copies (pass-by-value + *state =
+        // _state) of vector<Part>/vector<double> on every MCTS expansion.
+        if (state == NULL)
+            state = new State(std::move(_state));
+        else
+            *state = std::move(_state);
     }
     State *Node::get_state()
     {
@@ -776,7 +795,7 @@ namespace coacd
         State new_state = node->get_state()->get_next_state_with_random_choice();
 
         Node *sub_node = new Node(node->params);
-        sub_node->set_state(new_state);
+        sub_node->set_state(std::move(new_state));
         node->add_child(sub_node);
 
         return sub_node;

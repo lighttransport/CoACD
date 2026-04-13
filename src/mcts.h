@@ -39,7 +39,10 @@ namespace coacd
     vector<Plane> available_moves;
 
     Part(Params _params, Model mesh);
-    Part operator=(const Part &_part);
+    Part &operator=(const Part &_part);
+    Part(const Part &) = default;
+    Part(Part &&) = default;
+    Part &operator=(Part &&) = default;
     Plane get_one_move();
   };
 
@@ -65,9 +68,15 @@ namespace coacd
     State();
     State(Params _params);
     State(Params _params, Model &_initial_part);
-    State(Params _params, vector<double> &_current_costs, vector<Part> &_current_parts, Model &_initial_part);
+    // Takes the cost/parts vectors by value so callers can std::move
+    // their locals into us, avoiding redundant deep copies in the
+    // MCTS hot path.
+    State(Params _params, vector<double> _current_costs, vector<Part> _current_parts, const Model &_initial_part);
 
-    State operator=(const State &_state);
+    State &operator=(const State &_state);
+    State(const State &) = default;
+    State(State &&) = default;
+    State &operator=(State &&) = default;
 
     void set_current_value(pair<Plane, int> value);
     pair<Plane, int> get_current_value();
@@ -95,7 +104,7 @@ namespace coacd
 
     Node(Params _params);
     ~Node();
-    Node operator=(const Node &_node);
+    Node &operator=(const Node &_node);
     void set_state(State _state);
     State *get_state();
     void set_parent(Node *_parent);
