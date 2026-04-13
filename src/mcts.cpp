@@ -244,8 +244,11 @@ namespace coacd
     {
         return parent;
     }
-    vector<Node *> Node::get_children()
+    const vector<Node *> &Node::get_children() const
     {
+        // Return by reference — the previous by-value version copied the
+        // children pointer list on every MCTS visit, including during the
+        // hot `best_child` loop and during `free_tree` recursion.
         return children;
     }
     double Node::get_visit_times()
@@ -806,7 +809,7 @@ namespace coacd
         double best_score = INF;
         Node *best_sub_node = NULL;
 
-        vector<Node *> children = node->get_children();
+        const vector<Node *> &children = node->get_children();
         for (int i = 0; i < (int)children.size(); i++)
         {
             double C;
@@ -853,19 +856,18 @@ namespace coacd
 
     void free_tree(Node *root, int idx)
     {
-        if (root->get_children().size() == 0)
-        {
-            delete root;
+        // Hardened version: tolerate null root, iterate children by
+        // reference (no longer copies a vector<Node*> on every entry),
+        // and free each child before deleting the parent. The `idx`
+        // parameter is kept for backwards compatibility.
+        if (!root)
             return;
-        }
-
-        vector<Node *> children = root->get_children();
-        while (idx < (int)children.size())
+        const vector<Node *> &children = root->get_children();
+        for (int i = idx; i < (int)children.size(); i++)
         {
-            free_tree(children[idx++], 0);
+            free_tree(children[i], 0);
         }
         delete root;
-        return;
     }
 
     Node *MonteCarloTreeSearch(Params &params, Node *node, vector<Plane> &best_path)

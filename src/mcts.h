@@ -109,7 +109,7 @@ namespace coacd
     State *get_state();
     void set_parent(Node *_parent);
     Node *get_parent();
-    vector<Node *> get_children();
+    const vector<Node *> &get_children() const;
     double get_visit_times();
     void set_visit_times(double _visit_times);
     void visit_times_add_one();
