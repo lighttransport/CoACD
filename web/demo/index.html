@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>CoACD WASM demo</title>
+</head>
+<body>
+<h1>CoACD WASM demo</h1>
+<p>Decomposes a unit cube. Open the devtools console to see output.</p>
+<pre id="log"></pre>
+<script type="module">
+import { loadCoACD } from '../js/CoACDLoader.js';
+
+const logEl = document.getElementById('log');
+function log(...args) {
+    console.log(...args);
+    logEl.textContent += args.map(a =>
+        typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') + '\n';
+}
+
+const vertices = new Float64Array([
+    0,0,0,  1,0,0,  1,1,0,  0,1,0,
+    0,0,1,  1,0,1,  1,1,1,  0,1,1,
+]);
+const indices = new Int32Array([
+    0,2,1, 0,3,2,
+    4,5,6, 4,6,7,
+    0,1,5, 0,5,4,
+    2,3,7, 2,7,6,
+    1,2,6, 1,6,5,
+    0,4,7, 0,7,3,
+]);
+
+(async () => {
+    try {
+        const coacd = await loadCoACD();
+        coacd.setLogLevel('info');
+        const hulls = coacd.decompose(vertices, indices, {
+            threshold: 0.1,
+            preprocess: 'off',
+        });
+        log('hull count:', hulls.length);
+        hulls.forEach((h, i) => {
+            log(`  hull[${i}] verts=${h.vertices.length / 3} tris=${h.indices.length / 3}`);
+        });
+    } catch (e) {
+        log('ERROR', e.message || e);
+    }
+})();
+</script>
+</body>
+</html>
