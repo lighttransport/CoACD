@@ -6,6 +6,25 @@
 #include "../src/process.h"
 
 namespace coacd {
+namespace {
+void ValidateInputModel(Model const &model, char const *context) {
+  if (model.points.size() < 3 || model.triangles.empty()) {
+    throw std::runtime_error(std::string("CoACD ") + context +
+                             " mesh is empty or has no triangles.");
+  }
+
+  for (auto const &triangle : model.triangles) {
+    for (int i = 0; i < 3; ++i) {
+      if (triangle[i] < 0 ||
+          triangle[i] >= static_cast<int>(model.points.size())) {
+        throw std::runtime_error(std::string("CoACD ") + context +
+                                 " mesh has a triangle index out of range.");
+      }
+    }
+  }
+}
+} // namespace
+
 void RecoverParts(vector<Model> &meshes, vector<double> bbox,
                   array<array<double, 3>, 3> rot) {
   for (int i = 0; i < (int)meshes.size(); i++) {
@@ -74,6 +93,7 @@ std::vector<Mesh> CoACD(Mesh const &input, double threshold,
 
   Model m;
   m.Load(input.vertices, input.indices);
+  ValidateInputModel(m, "input");
   vector<double> bbox = m.Normalize();
 
   if (real_metric) {
@@ -98,6 +118,7 @@ std::vector<Mesh> CoACD(Mesh const &input, double threshold,
   } else if (params.preprocess_mode == std::string("on")) {
     ManifoldPreprocess(params, m);
   }
+  ValidateInputModel(m, "preprocessed");
 #else
   bool is_manifold = IsManifold(m);
   if (!is_manifold)

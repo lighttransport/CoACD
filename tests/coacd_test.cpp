@@ -146,6 +146,27 @@ coacd::Model to_model(const coacd::Mesh &mesh) {
   return model;
 }
 
+void test_is_manifold_rejects_empty_mesh() {
+  coacd::set_log_level("off");
+  coacd::Model model;
+
+  expect_true(!coacd::IsManifold(model), "empty mesh should not be manifold");
+}
+
+void test_is_manifold_rejects_out_of_range_triangle() {
+  coacd::set_log_level("off");
+  coacd::Model model;
+  model.points = {
+      {{0.0, 0.0, 0.0}},
+      {{1.0, 0.0, 0.0}},
+      {{0.0, 1.0, 0.0}},
+  };
+  model.triangles = {{{0, 1, 3}}};
+
+  expect_true(!coacd::IsManifold(model),
+              "mesh with out-of-range triangle index should not be manifold");
+}
+
 void test_public_api_convex_mesh_returns_single_part() {
   coacd::set_log_level("off");
   const coacd::Mesh mesh = make_tetrahedron_mesh();
@@ -166,6 +187,36 @@ void test_public_api_rejects_invalid_threshold() {
                            true, false, 64, false, 0.01, "ch", 1234, false);
       },
       "threshold > 1");
+}
+
+void test_public_api_rejects_empty_mesh() {
+  coacd::set_log_level("off");
+  const coacd::Mesh mesh;
+
+  expect_throws(
+      [&]() {
+        (void)coacd::CoACD(mesh, 0.2, -1, "off", 50, 128, 8, 16, 2, false,
+                           true, false, 64, false, 0.01, "ch", 1234, false);
+      },
+      "mesh is empty");
+}
+
+void test_public_api_rejects_out_of_range_triangle() {
+  coacd::set_log_level("off");
+  coacd::Mesh mesh;
+  mesh.vertices = {
+      {{0.0, 0.0, 0.0}},
+      {{1.0, 0.0, 0.0}},
+      {{0.0, 1.0, 0.0}},
+  };
+  mesh.indices = {{{0, 1, 3}}};
+
+  expect_throws(
+      [&]() {
+        (void)coacd::CoACD(mesh, 0.2, -1, "off", 50, 128, 8, 16, 2, false,
+                           true, false, 64, false, 0.01, "ch", 1234, false);
+      },
+      "triangle index out of range");
 }
 
 void test_c_api_convex_mesh_returns_single_part() {
@@ -233,8 +284,14 @@ int main() {
        test_public_api_convex_mesh_returns_single_part},
       {"public_api_rejects_invalid_threshold",
        test_public_api_rejects_invalid_threshold},
+      {"public_api_rejects_empty_mesh", test_public_api_rejects_empty_mesh},
+      {"public_api_rejects_out_of_range_triangle",
+       test_public_api_rejects_out_of_range_triangle},
       {"c_api_convex_mesh_returns_single_part",
        test_c_api_convex_mesh_returns_single_part},
+      {"is_manifold_rejects_empty_mesh", test_is_manifold_rejects_empty_mesh},
+      {"is_manifold_rejects_out_of_range_triangle",
+       test_is_manifold_rejects_out_of_range_triangle},
       {"clip_splits_cube_into_closed_parts", test_clip_splits_cube_into_closed_parts},
   };
 

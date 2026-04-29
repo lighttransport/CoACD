@@ -15,6 +15,14 @@ namespace coacd
         logger::info(" - Manifold Check");
         clock_t start, end;
         start = clock();
+        if (input.points.size() < 3 || input.triangles.empty())
+        {
+            logger::info("\tEmpty mesh");
+            end = clock();
+            logger::info("Manifold Check Time: {}s", double(end - start) / CLOCKS_PER_SEC);
+            return false;
+        }
+
         // Check all edges are shared by exactly two triangles (watertight manifold)
         vector<pair<int, int>> edges;
         map<pair<int, int>, int> edge_num;
@@ -23,6 +31,16 @@ namespace coacd
             int idx0 = input.triangles[i][0];
             int idx1 = input.triangles[i][1];
             int idx2 = input.triangles[i][2];
+            if (idx0 < 0 || idx1 < 0 || idx2 < 0 ||
+                idx0 >= (int)input.points.size() ||
+                idx1 >= (int)input.points.size() ||
+                idx2 >= (int)input.points.size())
+            {
+                logger::info("\tTriangle index out of range");
+                end = clock();
+                logger::info("Manifold Check Time: {}s", double(end - start) / CLOCKS_PER_SEC);
+                return false;
+            }
             edges.push_back({idx0, idx1});
             edges.push_back({idx1, idx2});
             edges.push_back({idx2, idx0});

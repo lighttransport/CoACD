@@ -6,12 +6,22 @@ namespace coacd
     BVH::BVH(const Model _model)
     {
         this->model = _model;
+        rootNodeIdx = -1;
+        nodesUsed = 0;
         BuildBVH();
     }
 
     void BVH::BuildBVH()
     {
         const int N = model.triangles.size();
+        if (N <= 0)
+        {
+            bvhNode.clear();
+            centroids.clear();
+            rootNodeIdx = -1;
+            nodesUsed = 0;
+            return;
+        }
         bvhNode.resize(N * 2 - 1);
         rootNodeIdx = 0;
         nodesUsed = 1;
@@ -156,14 +166,20 @@ namespace coacd
         vec3d tri_aabbMax = {-1e10, -1e10, -1e10};
         for (int i = 0; i < 3; i++)
         {
-            tri_aabbMin[i] = min(tri_aabbMin[i], model.points[triangleIdx[i]][i]);
-            tri_aabbMax[i] = max(tri_aabbMax[i], model.points[triangleIdx[i]][i]);
+            for (int j = 0; j < 3; j++)
+            {
+                tri_aabbMin[j] = min(tri_aabbMin[j], model.points[triangleIdx[i]][j]);
+                tri_aabbMax[j] = max(tri_aabbMax[j], model.points[triangleIdx[i]][j]);
+            }
         }
         return isOverlap3D(tri_aabbMin, aabbMin, tri_aabbMax, aabbMax);
     }
 
     bool BVH::IntersectBVH(vec3i triangleIdx, const int nodeIdx)
     {
+        if (nodeIdx < 0 || nodeIdx >= (int)bvhNode.size())
+            return false;
+
         BVHNode &node = bvhNode[nodeIdx];
         if (!IntersectAABB(triangleIdx, node.aabbMin, node.aabbMax))
             return false;
