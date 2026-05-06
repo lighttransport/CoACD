@@ -2,6 +2,7 @@
 #include "mcts.h"
 #include "config.h"
 #include "bvh.h"
+#include "progress.h"
 
 #include <iostream>
 #include <cmath>
@@ -13,6 +14,7 @@ namespace coacd
     bool IsManifold(Model &input)
     {
         logger::info(" - Manifold Check");
+        EmitProgress("manifold_check", 0, 0);
         clock_t start, end;
         start = clock();
         if (input.points.size() < 3 || input.triangles.empty())
@@ -235,6 +237,7 @@ namespace coacd
     void DecimateConvexHulls(vector<Model> &cvxs, Params &params)
     {
         logger::info(" - Simplify Convex Hulls");
+        EmitProgress("simplify_hulls", 0, 0);
         for (int i = 0; i < (int)cvxs.size(); i++)
         {
             DecimateCH(cvxs[i], params.max_ch_vertex, params.apx_mode);
@@ -256,6 +259,7 @@ namespace coacd
     double MergeConvexHulls(Model &m, vector<Model> &meshs, vector<Model> &cvxs, Params &params, double epsilon, double threshold)
     {
         logger::info(" - Merge Convex Hulls");
+        EmitProgress("merge", 0, 0);
         size_t nConvexHulls = (size_t)cvxs.size();
         double h = 0;
 
@@ -449,6 +453,7 @@ namespace coacd
     void ExtrudeConvexHulls(vector<Model> &cvxs, Params &params, double eps)
     {
         logger::info(" - Extrude Convex Hulls");
+        EmitProgress("extrude", 0, 0);
         for (int i = 0; i < (int)cvxs.size(); i++)
         {
             Model cvx = cvxs[i];
@@ -489,6 +494,7 @@ namespace coacd
         logger::info("# Points: {}", mesh.points.size());
         logger::info("# Triangles: {}", mesh.triangles.size());
         logger::info(" - Decomposition (MCTS)");
+        EmitProgress("decompose", 0, 0);
 
         size_t iter = 0;
         double cut_area;
@@ -496,14 +502,19 @@ namespace coacd
         {
             vector<Model> tmp;
             logger::info("iter {} ---- waiting pool: {}", iter, InputParts.size());
+            EmitProgress("iter", static_cast<long long>(iter),
+                         static_cast<long long>(InputParts.size()));
 #ifdef _OPENMP
 #pragma omp parallel for default(none) shared(InputParts, params, mesh, writelock, parts, pmeshs, tmp) private(cut_area)
 #endif
             for (int p = 0; p < (int)InputParts.size(); p++)
             {
                 random_engine.seed(params.seed);
-                if (p % ((int)InputParts.size() / 10 + 1) == 0)
+                if (p % ((int)InputParts.size() / 10 + 1) == 0) {
                     logger::info("Processing [{:.1f}%]", p * 100.0 / (int)InputParts.size());
+                    EmitProgress("processing", static_cast<long long>(p),
+                                 static_cast<long long>(InputParts.size()));
+                }
 
                 Model pmesh = InputParts[p], pCH;
                 Plane bestplane;

@@ -65,4 +65,18 @@ CoACD_MeshArray COACD_API CoACD_run(CoACD_Mesh const &input, double threshold,
                                     bool real_metric);
 
 void COACD_API CoACD_setLogLevel(char const *level);
+
+// Progress callback. Invoked synchronously from CoACD's working thread
+// (the same one that called CoACD_run). `stage` is a short ASCII tag —
+// "preprocess", "iter", "processing", "merge", "extrude", "decompose_done".
+// `current` and `total` are integer counters; `total<=0` means the count
+// is open-ended (e.g. number of MCTS outer iterations is not known up
+// front). `userdata` is the pointer passed to CoACD_setProgressCallback.
+typedef void (*CoACD_ProgressCallback)(const char* stage,
+                                       long long current,
+                                       long long total,
+                                       void* userdata);
+
+void COACD_API CoACD_setProgressCallback(CoACD_ProgressCallback cb,
+                                         void* userdata);
 }
