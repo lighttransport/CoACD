@@ -504,6 +504,34 @@ namespace coacd
             logger::info("iter {} ---- waiting pool: {}", iter, InputParts.size());
             EmitProgress("iter", static_cast<long long>(iter),
                          static_cast<long long>(InputParts.size()));
+            if (params.max_convex_hull > 0)
+            {
+                const int maxHull = params.max_convex_hull;
+                const int accepted = (int)parts.size();
+                const int active = (int)InputParts.size();
+                // Each active part can split into two children. CoACD's
+                // merge stage also observes max_convex_hull, but letting the
+                // active pool grow far past the requested budget can send MCTS
+                // into unstable tiny-part splits before merge ever runs.
+                if (accepted + active * 2 > maxHull)
+                {
+                    logger::info("Hull budget reached before split round: accepted={} active={} max={}",
+                                 accepted, active, maxHull);
+                    EmitProgress("hull_budget", static_cast<long long>(accepted + active),
+                                 static_cast<long long>(maxHull));
+                    for (int p = 0; p < active; p++)
+                    {
+                        Model pmesh = InputParts[p], pCH;
+                        pmesh.ComputeAPX(pCH, params.apx_mode, true);
+                        parts.push_back(pCH);
+                        pmeshs.push_back(pmesh);
+                        EmitProgress("part_hull", static_cast<long long>(p + 1),
+                                     static_cast<long long>(active));
+                    }
+                    InputParts.clear();
+                    break;
+                }
+            }
 #ifdef _OPENMP
 #pragma omp parallel for default(none) shared(InputParts, params, mesh, writelock, parts, pmeshs, tmp) private(cut_area)
 #endif
@@ -518,8 +546,14 @@ namespace coacd
 
                 Model pmesh = InputParts[p], pCH;
                 Plane bestplane;
+                EmitProgress("part_begin", static_cast<long long>(p),
+                             static_cast<long long>(InputParts.size()));
                 pmesh.ComputeAPX(pCH, params.apx_mode, true);
+                EmitProgress("part_hull", static_cast<long long>(p),
+                             static_cast<long long>(InputParts.size()));
                 double h = ComputeHCost(pmesh, pCH, params.rv_k, params.resolution, params.seed, 0.0001, false);
+                EmitProgress("part_cost", static_cast<long long>(p),
+                             static_cast<long long>(InputParts.size()));
 
                 if (h > params.threshold)
                 {
@@ -529,8 +563,12 @@ namespace coacd
                     Node *node = new Node(params);
                     State state(params, pmesh);
                     node->set_state(std::move(state));
+                    EmitProgress("mcts_begin", static_cast<long long>(p),
+                                 static_cast<long long>(InputParts.size()));
                     Node *best_next_node = MonteCarloTreeSearch(params, node, best_path);
-                    if (best_next_node == NULL)
+                    EmitProgress("mcts_done", static_cast<long long>(p),
+                                 static_cast<long long>(InputParts.size()));
+                    if (best_next_node == NULL || best_next_node->state == NULL)
                     {
 #ifdef _OPENMP
                         omp_set_lock(&writelock);
@@ -545,15 +583,31 @@ namespace coacd
                     else
                     {
                         bestplane = best_next_node->state->current_value.first;
+                        EmitProgress("ternary_begin", static_cast<long long>(p),
+                                     static_cast<long long>(InputParts.size()));
                         TernaryMCTS(pmesh, params, bestplane, best_path, best_next_node->quality_value); // using Rv to Ternary refine
+                        EmitProgress("ternary_done", static_cast<long long>(p),
+                                     static_cast<long long>(InputParts.size()));
                         free_tree(node, 0);
 
                         Model pos, neg;
+                        EmitProgress("clip_begin", static_cast<long long>(p),
+                                     static_cast<long long>(InputParts.size()));
                         bool clipf = Clip(pmesh, pos, neg, bestplane, cut_area);
+                        EmitProgress("clip_done", static_cast<long long>(p),
+                                     static_cast<long long>(InputParts.size()));
                         if (!clipf)
                         {
-                            logger::error("Wrong clip proposal!");
-                            throw runtime_error("Wrong clip proposal!");
+                            logger::warn("Ignoring invalid clip proposal; keeping current convex approximation");
+#ifdef _OPENMP
+                            omp_set_lock(&writelock);
+#endif
+                            parts.push_back(pCH);
+                            pmeshs.push_back(pmesh);
+#ifdef _OPENMP
+                            omp_unset_lock(&writelock);
+#endif
+                            continue;
                         }
 #ifdef _OPENMP
                         omp_set_lock(&writelock);

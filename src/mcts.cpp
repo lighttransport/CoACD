@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "mcts.h"
 #include "process.h"
+#include "progress.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
@@ -403,6 +404,7 @@ namespace coacd
             double res = 0;
             while (left + epsilon < right && iter++ < thres)
             {
+                EmitProgress("ternary_x", static_cast<long long>(iter), static_cast<long long>(thres));
                 Model pos1, neg1, posCH1, negCH1, pos2, neg2, posCH2, negCH2;
                 double margin = (right - left) / 3.0;
                 double m1 = left + margin;
@@ -461,6 +463,7 @@ namespace coacd
             double res = 0;
             while (left + epsilon < right && iter++ < thres)
             {
+                EmitProgress("ternary_y", static_cast<long long>(iter), static_cast<long long>(thres));
                 Model pos1, neg1, posCH1, negCH1, pos2, neg2, posCH2, negCH2;
                 double margin = (right - left) / 3.0;
                 double m1 = left + margin;
@@ -518,6 +521,7 @@ namespace coacd
             double res = 0;
             while (left + epsilon < right && iter++ < thres)
             {
+                EmitProgress("ternary_z", static_cast<long long>(iter), static_cast<long long>(thres));
                 Model pos1, neg1, posCH1, negCH1, pos2, neg2, posCH2, negCH2;
                 double margin = (right - left) / 3.0;
                 double m1 = left + margin;
@@ -668,8 +672,14 @@ namespace coacd
         double H_min = INF;
         double cut_area;
         bool flag;
+        const int progress_stride = std::max(1, (int)planes.size() / 25);
         for (int i = 0; i < (int)planes.size(); i++)
         {
+            if (i == 0 || ((i + 1) % progress_stride) == 0 || i + 1 == (int)planes.size())
+            {
+                EmitProgress("mcts_plane", static_cast<long long>(i + 1),
+                             static_cast<long long>(planes.size()));
+            }
             Model pos, neg, posCH, negCH;
 
             flag = Clip(m, pos, neg, planes[i], cut_area);
@@ -739,8 +749,11 @@ namespace coacd
         double current_state_reward;
         original_state->worst_part_idx = current_state.worst_part_idx;
 
+        int rollout_step = 0;
         while (current_state.is_terminal() == false)
         {
+            EmitProgress("mcts_rollout", static_cast<long long>(rollout_step + 1),
+                         static_cast<long long>(params.mcts_max_depth));
             vector<Plane> planes;
             Plane bestplane;
             double bestcost, cut_area;
@@ -788,6 +801,7 @@ namespace coacd
             current_state.current_cost += current_state_reward;
 
             current_state.current_round = current_state.current_round + 1;
+            rollout_step++;
         }
 
         return current_state.current_cost / params.mcts_max_depth; // mean
@@ -880,6 +894,12 @@ namespace coacd
 
         for (int i = 0; i < computation_budget; i++)
         {
+            const int stride = std::max(1, computation_budget / 50);
+            if (i == 0 || ((i + 1) % stride) == 0 || i + 1 == computation_budget)
+            {
+                EmitProgress("mcts_iter", static_cast<long long>(i + 1),
+                             static_cast<long long>(computation_budget));
+            }
             current_path.clear();
             bool flag = false;
             Node *expand_node = tree_policy(node, cost, flag);
