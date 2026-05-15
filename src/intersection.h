@@ -636,6 +636,129 @@ namespace threeyd
                 return false;
             }
 
+            inline static bool nearly_same_point(const TemplatedVec &a, const TemplatedVec &b, declfloat tolerance)
+            {
+                return std::abs(a[X] - b[X]) <= tolerance &&
+                       std::abs(a[Y] - b[Y]) <= tolerance &&
+                       std::abs(a[Z] - b[Z]) <= tolerance;
+            }
+
+            inline static void compute_triangle_plane_interval_robust(
+                const TemplatedVec &V0,
+                const TemplatedVec &V1,
+                const TemplatedVec &V2,
+                const declfloat x0,
+                const declfloat x1,
+                const declfloat x2,
+                const declfloat d0,
+                const declfloat d1,
+                const declfloat d2,
+                declfloat &endpoint_x_0,
+                declfloat &endpoint_x_1,
+                TemplatedVec &Endpoint_0,
+                TemplatedVec &Endpoint_1)
+            {
+                std::array<TemplatedVec, 6> points;
+                std::array<declfloat, 6> xs{};
+                unsigned count = 0;
+                const declfloat tolerance = static_cast<declfloat>(detail::Tolerance::get_value());
+                const declfloat dist_scale =
+                    std::max(static_cast<declfloat>(1.0),
+                             std::max(std::abs(d0), std::max(std::abs(d1), std::abs(d2))));
+                const declfloat dist_tolerance = tolerance * dist_scale;
+
+                auto add_point = [&](const TemplatedVec &p, declfloat x)
+                {
+                    for (unsigned i = 0; i < count; ++i)
+                    {
+                        if (nearly_same_point(points[i], p, tolerance))
+                        {
+                            return;
+                        }
+                    }
+                    if (count < points.size())
+                    {
+                        points[count] = p;
+                        xs[count] = x;
+                        ++count;
+                    }
+                };
+
+                auto on_plane = [&](declfloat d)
+                {
+                    return std::abs(d) <= dist_tolerance;
+                };
+
+                auto add_edge = [&](const TemplatedVec &A, const TemplatedVec &B,
+                                    declfloat xa, declfloat xb, declfloat da, declfloat db)
+                {
+                    const bool a_on = on_plane(da);
+                    const bool b_on = on_plane(db);
+                    if (a_on)
+                    {
+                        add_point(A, xa);
+                    }
+                    if (b_on)
+                    {
+                        add_point(B, xb);
+                    }
+                    if (a_on || b_on)
+                    {
+                        return;
+                    }
+                    if ((da < 0 && db > 0) || (da > 0 && db < 0))
+                    {
+                        const declfloat denom = da - db;
+                        if (std::abs(denom) > dist_tolerance)
+                        {
+                            declfloat w = da / denom;
+                            detail::clip_to_01(w);
+                            TemplatedVec displacement;
+                            sub(displacement, B, A);
+                            mult(displacement, displacement, w);
+                            TemplatedVec p;
+                            add(p, A, displacement);
+                            add_point(p, xa + (xb - xa) * w);
+                        }
+                    }
+                };
+
+                add_edge(V0, V1, x0, x1, d0, d1);
+                add_edge(V0, V2, x0, x2, d0, d2);
+                add_edge(V1, V2, x1, x2, d1, d2);
+
+                if (count == 0)
+                {
+                    endpoint_x_0 = endpoint_x_1 = x0;
+                    Endpoint_0 = Endpoint_1 = V0;
+                    return;
+                }
+                if (count == 1)
+                {
+                    endpoint_x_0 = endpoint_x_1 = xs[0];
+                    Endpoint_0 = Endpoint_1 = points[0];
+                    return;
+                }
+
+                unsigned min_idx = 0;
+                unsigned max_idx = 0;
+                for (unsigned i = 1; i < count; ++i)
+                {
+                    if (xs[i] < xs[min_idx])
+                    {
+                        min_idx = i;
+                    }
+                    if (xs[i] > xs[max_idx])
+                    {
+                        max_idx = i;
+                    }
+                }
+                endpoint_x_0 = xs[min_idx];
+                endpoint_x_1 = xs[max_idx];
+                Endpoint_0 = points[min_idx];
+                Endpoint_1 = points[max_idx];
+            }
+
             // Computes extreme intersection points (endpoints) between a triangle and the plane of another triangle.
             // It must have been already established that such intersection exists.
             // It is assumed that V0 is on the other side of the plane than V1 and V2
@@ -660,15 +783,28 @@ namespace threeyd
                                       TemplatedVec &Endpoint_0, // intersection endpoint 0 in 3D
                                       TemplatedVec &Endpoint_1) // intersection endpoint 1 in 3D
             {
-                assert(d0 != d1); // moreover, d0 and d1 must have different signs: +, 0 or -
-                assert(d0 != d2); // moreover, d0 and d2 must have different signs: +, 0 or -
+                const declfloat denom01 = d0 - d1;
+                const declfloat denom02 = d0 - d2;
+                const declfloat dist_scale =
+                    std::max(static_cast<declfloat>(1.0),
+                             std::max(std::abs(d0), std::max(std::abs(d1), std::abs(d2))));
+                const declfloat denom_tolerance =
+                    static_cast<declfloat>(detail::Tolerance::get_value()) * dist_scale;
+                if (std::abs(denom01) <= denom_tolerance ||
+                    std::abs(denom02) <= denom_tolerance)
+                {
+                    compute_triangle_plane_interval_robust(
+                        V0, V1, V2, x0, x1, x2, d0, d1, d2,
+                        endpoint_x_0, endpoint_x_1, Endpoint_0, Endpoint_1);
+                    return;
+                }
 
                 std::array<Triplet, 2> x_w_pairs;
-                declfloat w = d0 / (d0 - d1);
+                declfloat w = d0 / denom01;
                 detail::clip_to_01(w);
                 declfloat x = x0 + (x1 - x0) * w;
                 x_w_pairs[0] = Triplet{x, w, 0};
-                w = d0 / (d0 - d2);
+                w = d0 / denom02;
                 detail::clip_to_01(w);
                 x = x0 + (x2 - x0) * w;
                 x_w_pairs[1] = Triplet{x, w, 1};
